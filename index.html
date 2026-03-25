@@ -1,1 +1,566 @@
-# MazeRunner
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<title>MAZEX</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Rajdhani:wght@600;700&family=Teko:wght@400;600;700&family=Orbitron:wght@700;900&display=swap');
+
+:root {
+  --bg:      #04060f;
+  --wall:    #0b1535;
+  --floor:   #050810;
+  --vis:     #07101f;
+  --player:  #f0ff00;
+  --pglow:   rgba(240,255,0,0.35);
+  --exit:    #ff4ecd;
+  --eglow:   rgba(255,78,205,0.4);
+  --accent:  #f0ff00;
+  --accent2: #ff4ecd;
+  --text:    #d6eaff;
+  --muted:   rgba(214,234,255,0.38);
+  --danger:  #ff3a3a;
+  --safe:    #3affa0;
+  --border:  rgba(240,255,0,0.12);
+}
+
+/* DIFFICULTY THEMES */
+body.easy {
+  --accent:  #3affa0;
+  --accent2: #00d4ff;
+  --player:  #3affa0;
+  --pglow:   rgba(58,255,160,0.35);
+  --exit:    #00d4ff;
+  --eglow:   rgba(0,212,255,0.4);
+  --border:  rgba(58,255,160,0.12);
+  --safe:    #3affa0;
+}
+body.medium {
+  --accent:  #f0ff00;
+  --accent2: #ff9500;
+  --player:  #f0ff00;
+  --pglow:   rgba(240,255,0,0.35);
+  --exit:    #ff9500;
+  --eglow:   rgba(255,149,0,0.4);
+  --border:  rgba(240,255,0,0.12);
+}
+body.hard {
+  --accent:  #ff3a3a;
+  --accent2: #ff6b00;
+  --player:  #ff3a3a;
+  --pglow:   rgba(255,58,58,0.35);
+  --exit:    #ff6b00;
+  --eglow:   rgba(255,107,0,0.4);
+  --border:  rgba(255,58,58,0.12);
+  --bg:      #0f0404;
+  --wall:    #2a0808;
+  --floor:   #0a0303;
+}
+
+*,*::before,*::after{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+
+html,body{
+  width:100%;height:100%;
+  overflow:hidden;
+  background:var(--bg);
+  color:var(--text);
+  font-family:'Rajdhani',sans-serif;
+  touch-action:none;
+  user-select:none;
+  -webkit-user-select:none;
+  position:fixed;
+  transition: background 0.6s ease;
+}
+
+#bgc{position:fixed;inset:0;z-index:0;pointer-events:none;}
+
+#shell{
+  position:relative;z-index:1;
+  width:100%;height:100%;
+  display:flex;flex-direction:column;
+  padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px)
+          env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px);
+}
+
+/* HEADER */
+#hdr{
+  flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 16px 8px;
+  background:linear-gradient(180deg,rgba(4,6,15,1),rgba(4,6,15,0.55));
+  border-bottom:1px solid var(--border);
+  position:relative;
+  transition: border-color 0.6s;
+}
+#hdr::after{
+  content:'';position:absolute;bottom:0;left:10%;right:10%;height:1px;
+  background:linear-gradient(90deg,transparent,var(--accent),transparent);
+  opacity:0.4;transition: background 0.6s;
+}
+#logo{
+  font-family:'Orbitron',sans-serif;font-size:clamp(18px,5vw,26px);font-weight:900;
+  letter-spacing:4px;line-height:1;
+  color:var(--accent);
+  text-shadow:0 0 14px var(--accent),0 0 40px rgba(240,255,0,0.25);
+  transition: color 0.6s, text-shadow 0.6s;
+}
+#logo em{color:var(--accent2);font-style:normal;text-shadow:0 0 14px var(--accent2);transition: color 0.6s, text-shadow 0.6s;}
+
+/* DIFFICULTY BADGE */
+#diff-badge{
+  font-family:'Teko',sans-serif;font-size:11px;letter-spacing:3px;
+  padding:2px 8px;border-radius:4px;border:1px solid var(--accent);
+  color:var(--accent);background:rgba(0,0,0,0.3);
+  transition: all 0.6s;
+  cursor:pointer;
+}
+#diff-badge:hover{background:rgba(255,255,255,0.05);}
+
+#stats{display:flex;gap:14px;}
+.st{display:flex;flex-direction:column;align-items:flex-end;gap:0;}
+.st-l{font-size:9px;letter-spacing:1.5px;color:var(--muted);text-transform:uppercase;}
+.st-v{font-family:'Teko',sans-serif;font-size:clamp(16px,5vw,22px);color:var(--accent);letter-spacing:1px;line-height:1.05;transition: color 0.6s;}
+
+/* RIBBON */
+#ribbon{
+  flex-shrink:0;
+  display:flex;align-items:center;gap:8px;
+  padding:4px 16px 5px;
+  background:rgba(4,6,15,0.72);
+  border-bottom:1px solid rgba(255,255,255,0.04);
+}
+#rib-lbl{font-size:9px;letter-spacing:2px;color:var(--muted);white-space:nowrap;text-transform:uppercase;}
+#prog{flex:1;height:3px;background:rgba(255,255,255,0.06);border-radius:2px;overflow:hidden;}
+#prog-fill{
+  height:100%;
+  background:linear-gradient(90deg,var(--accent),var(--accent2));
+  box-shadow:0 0 6px var(--accent);
+  border-radius:2px;
+  transition:width 0.6s cubic-bezier(.23,1,.32,1), background 0.6s;
+}
+#rib-lv{font-family:'Teko',sans-serif;font-size:12px;color:var(--accent2);letter-spacing:1px;white-space:nowrap;transition: color 0.6s;}
+
+/* TIMER BAR — hard mode only */
+#timer-bar-wrap{
+  flex-shrink:0;
+  display:none;
+  padding:2px 16px 3px;
+  background:rgba(15,4,4,0.85);
+  border-bottom:1px solid rgba(255,58,58,0.12);
+  gap:6px;align-items:center;
+}
+body.hard #timer-bar-wrap{display:flex;}
+#timer-bar-lbl{font-size:9px;letter-spacing:2px;color:rgba(255,80,80,0.6);text-transform:uppercase;white-space:nowrap;}
+#timer-bar{flex:1;height:4px;background:rgba(255,58,58,0.1);border-radius:2px;overflow:hidden;}
+#timer-bar-fill{
+  height:100%;width:100%;
+  background:linear-gradient(90deg,#ff6b00,#ff3a3a);
+  box-shadow:0 0 8px rgba(255,58,58,0.5);
+  border-radius:2px;
+  transition:width 0.5s linear;
+}
+#timer-bar-sec{font-family:'Teko',sans-serif;font-size:12px;color:#ff3a3a;letter-spacing:1px;white-space:nowrap;}
+
+/* MAZE ZONE */
+#mzone{
+  flex:1;display:flex;align-items:center;justify-content:center;
+  position:relative;overflow:hidden;min-height:0;
+}
+#mframe{
+  position:relative;
+  box-shadow:0 0 0 1px rgba(240,255,0,0.07),0 0 40px rgba(0,0,0,0.7);
+  border-radius:2px;
+}
+#mframe::before,#mframe::after,
+#mframe .cb,.mframe .cb2{content:'';position:absolute;width:16px;height:16px;border-color:var(--accent);border-style:solid;z-index:4;pointer-events:none;transition: border-color 0.6s;}
+#mframe::before{top:-1px;left:-1px;border-width:2px 0 0 2px;border-radius:2px 0 0 0;}
+#mframe::after{top:-1px;right:-1px;border-width:2px 2px 0 0;border-radius:0 2px 0 0;}
+#mframe .cb{bottom:-1px;right:-1px;border-width:0 2px 2px 0;border-radius:0 0 2px 0;}
+#mframe .cb2{bottom:-1px;left:-1px;border-width:0 0 2px 2px;border-radius:0 0 0 2px;}
+
+canvas#mc{display:block;image-rendering:pixelated;border-radius:2px;}
+
+/* FOG overlay for hard mode */
+#fog{
+  position:absolute;inset:0;pointer-events:none;z-index:3;
+  display:none;
+  border-radius:2px;
+  overflow:hidden;
+}
+body.hard #fog{display:block;}
+
+#shint{
+  position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+  font-size:9px;letter-spacing:3px;color:var(--muted);text-transform:uppercase;
+  pointer-events:none;white-space:nowrap;
+  animation:fhint 3s ease forwards;
+}
+@keyframes fhint{0%{opacity:0.7}70%{opacity:0.4}100%{opacity:0}}
+
+/* DPAD ZONE */
+#dz{
+  flex-shrink:0;
+  display:flex;align-items:center;justify-content:space-between;
+  padding:10px 18px 14px;
+  background:linear-gradient(0deg,rgba(4,6,15,1) 60%,rgba(4,6,15,0.55));
+  border-top:1px solid var(--border);
+  gap:10px;
+  transition: border-color 0.6s;
+}
+
+.side{display:flex;flex-direction:column;justify-content:center;min-width:64px;gap:6px;}
+.side-r{align-items:flex-end;}
+.side-label{font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;}
+.side-val{font-family:'Teko',sans-serif;font-size:clamp(26px,7vw,38px);line-height:1;}
+.mini-row{display:flex;flex-direction:column;gap:1px;}
+.mini-lbl{font-size:9px;color:var(--muted);}
+.mini-v{font-family:'Teko',sans-serif;font-size:14px;color:var(--safe);}
+
+/* D-PAD GRID */
+#dpad{
+  display:grid;
+  grid-template-columns:repeat(3,1fr);
+  grid-template-rows:repeat(3,1fr);
+  gap:5px;
+  width:clamp(148px,40vw,180px);
+  height:clamp(148px,40vw,180px);
+  flex-shrink:0;
+}
+.dp{
+  border-radius:10px;
+  background:rgba(14,22,46,0.95);
+  border:1px solid var(--border);
+  display:flex;align-items:center;justify-content:center;
+  color:var(--accent);
+  font-size:clamp(17px,5vw,23px);
+  cursor:pointer;
+  position:relative;overflow:hidden;
+  transition:border-color 0.09s,box-shadow 0.09s,transform 0.07s, color 0.6s, background 0.6s;
+  box-shadow:0 4px 12px rgba(0,0,0,0.45),inset 0 1px 0 rgba(255,255,255,0.04);
+}
+.dp::after{
+  content:'';position:absolute;inset:0;border-radius:inherit;
+  background:radial-gradient(circle,rgba(240,255,0,0.1),transparent 70%);
+  opacity:0;transition:opacity 0.12s;
+}
+.dp.on,.dp:active{
+  border-color:var(--accent);
+  box-shadow:0 0 0 1px var(--accent),0 0 18px var(--pglow),inset 0 0 10px rgba(240,255,0,0.07);
+  transform:scale(0.91);color:#fff;
+}
+.dp.on::after,.dp:active::after{opacity:1;}
+.dp-blank{background:transparent!important;border:none!important;pointer-events:none!important;box-shadow:none!important;}
+.dp-new{
+  background:rgba(255,58,58,0.07)!important;
+  border-color:rgba(255,58,58,0.2)!important;
+  color:var(--danger)!important;
+  font-family:'Teko',sans-serif;font-size:11px;letter-spacing:1.5px;font-weight:700;
+}
+.dp-new:active{border-color:var(--danger)!important;box-shadow:0 0 14px rgba(255,58,58,0.35)!important;}
+
+/* FLASH */
+#flash{position:fixed;inset:0;z-index:500;pointer-events:none;background:#fff;opacity:0;transition:opacity 0.07s;}
+#flash.go{opacity:0.2;}
+
+/* OVERLAY */
+#ov{
+  position:fixed;inset:0;z-index:300;
+  display:flex;align-items:center;justify-content:center;
+  background:rgba(4,6,15,0.88);
+  backdrop-filter:blur(10px) saturate(0.5);
+  -webkit-backdrop-filter:blur(10px) saturate(0.5);
+  overflow-y: auto;
+  padding: 16px;
+}
+#ov.hidden{display:none;}
+
+.card{
+  width:min(380px,92vw);
+  background:linear-gradient(145deg,#0c1433,#060c1f);
+  border:1px solid rgba(240,255,0,0.16);
+  border-radius:18px;
+  padding:28px 26px 26px;
+  text-align:center;
+  position:relative;overflow:hidden;
+  box-shadow:0 0 0 1px rgba(0,0,0,0.5),0 32px 80px rgba(0,0,0,0.85),0 0 60px rgba(240,255,0,0.04);
+  animation:cin 0.38s cubic-bezier(.23,1,.32,1) both;
+}
+@keyframes cin{from{opacity:0;transform:translateY(20px) scale(0.96)}to{opacity:1;transform:none}}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--accent),var(--accent2),transparent);
+  transition: background 0.6s;
+}
+.card-eye{font-size:9px;letter-spacing:4px;color:var(--muted);margin-bottom:8px;text-transform:uppercase;}
+.card-title{
+  font-family:'Orbitron',sans-serif;font-size:clamp(28px,9vw,46px);font-weight:900;
+  line-height:0.95;margin-bottom:12px;
+  text-shadow:0 0 40px currentColor;
+  letter-spacing:2px;
+}
+.card-desc{font-size:13px;color:var(--muted);line-height:1.7;margin-bottom:14px;}
+.card-desc b{color:var(--accent2);}
+.sgrid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:14px 0;}
+.sc{
+  background:rgba(240,255,0,0.03);border:1px solid rgba(240,255,0,0.08);
+  border-radius:8px;padding:10px 8px;
+}
+.sc-l{font-size:9px;letter-spacing:2px;color:var(--muted);text-transform:uppercase;}
+.sc-v{font-family:'Teko',sans-serif;font-size:22px;color:var(--accent);line-height:1.1;}
+.cta{
+  display:block;width:100%;padding:14px;
+  background:transparent;border:1px solid var(--accent);
+  color:var(--accent);
+  font-family:'Teko',sans-serif;font-size:18px;font-weight:700;letter-spacing:4px;
+  border-radius:10px;cursor:pointer;margin-top:8px;
+  transition:all 0.18s;
+  position:relative;overflow:hidden;
+  text-transform:uppercase;
+}
+.cta::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;
+  background:linear-gradient(135deg,rgba(240,255,0,0.09),transparent);
+  opacity:0;transition:opacity 0.18s;
+}
+.cta:hover::before,.cta:active::before{opacity:1;}
+.cta:active{transform:scale(0.96);box-shadow:0 0 22px var(--pglow);}
+.cta-sub{
+  background:rgba(255,255,255,0.03);
+  border-color:rgba(255,255,255,0.12);
+  color:var(--muted);
+  font-size:14px;
+  padding:10px;
+  margin-top:6px;
+}
+
+/* ── DIFFICULTY SELECTOR ───────────────────────── */
+.diff-grid{
+  display:grid;grid-template-columns:1fr;gap:10px;
+  margin:18px 0 6px;
+}
+.diff-btn{
+  border-radius:12px;
+  padding:14px 16px;
+  border:1px solid;
+  cursor:pointer;
+  display:flex;align-items:center;gap:14px;
+  text-align:left;
+  position:relative;overflow:hidden;
+  transition:all 0.2s;
+  background:transparent;
+}
+.diff-btn::before{
+  content:'';position:absolute;inset:0;border-radius:inherit;opacity:0.06;
+  transition:opacity 0.2s;
+}
+.diff-btn:hover::before,.diff-btn:active::before{opacity:0.13;}
+.diff-btn:hover{transform:translateY(-1px);}
+.diff-btn:active{transform:scale(0.97);}
+.diff-easy{border-color:rgba(58,255,160,0.4);color:#3affa0;}
+.diff-easy::before{background:#3affa0;}
+.diff-medium{border-color:rgba(240,255,0,0.4);color:#f0ff00;}
+.diff-medium::before{background:#f0ff00;}
+.diff-hard{border-color:rgba(255,58,58,0.4);color:#ff3a3a;}
+.diff-hard::before{background:#ff3a3a;}
+.diff-icon{font-size:26px;flex-shrink:0;width:36px;text-align:center;}
+.diff-info{flex:1;}
+.diff-name{font-family:'Orbitron',sans-serif;font-size:14px;font-weight:700;letter-spacing:3px;line-height:1;}
+.diff-desc{font-size:11px;margin-top:4px;opacity:0.65;line-height:1.4;color:var(--text);}
+.diff-tag{
+  font-family:'Teko',sans-serif;font-size:11px;letter-spacing:2px;
+  padding:2px 8px;border-radius:20px;border:1px solid currentColor;
+  opacity:0.7;white-space:nowrap;flex-shrink:0;
+}
+.diff-stars{letter-spacing:2px;font-size:13px;}
+
+/* HARD MODE DANGER PULSE */
+body.hard #mzone::after{
+  content:'';
+  position:absolute;inset:0;pointer-events:none;z-index:2;
+  border-radius:2px;
+  box-shadow:inset 0 0 40px rgba(255,40,40,0.12);
+  animation:dangerPulse 2s ease-in-out infinite;
+}
+@keyframes dangerPulse{
+  0%,100%{box-shadow:inset 0 0 30px rgba(255,40,40,0.08);}
+  50%{box-shadow:inset 0 0 50px rgba(255,40,40,0.18);}
+}
+
+/* SCANLINE overlay for hard mode */
+body.hard #mzone::before{
+  content:'';
+  position:absolute;inset:0;pointer-events:none;z-index:2;
+  background:repeating-linear-gradient(0deg,transparent,transparent 2px,rgba(0,0,0,0.04) 2px,rgba(0,0,0,0.04) 4px);
+}
+
+/* TIMEOUT overlay */
+#timeout-screen{
+  position:fixed;inset:0;z-index:400;
+  display:flex;align-items:center;justify-content:center;flex-direction:column;gap:12px;
+  background:rgba(10,0,0,0.9);
+  backdrop-filter:blur(8px);
+  animation:cin 0.25s ease both;
+}
+#timeout-screen.hidden{display:none;}
+.to-title{
+  font-family:'Orbitron',sans-serif;font-size:clamp(40px,12vw,72px);font-weight:900;
+  color:#ff3a3a;text-shadow:0 0 60px rgba(255,58,58,0.6);
+  letter-spacing:4px;animation:shk 0.4s ease;
+}
+@keyframes shk{0%,100%{transform:none}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.to-sub{font-family:'Teko',sans-serif;font-size:clamp(14px,4vw,20px);letter-spacing:4px;color:rgba(255,100,100,0.7);}
+
+/* COMBO / STREAK BADGE */
+#streak-badge{
+  position:absolute;top:8px;right:8px;
+  z-index:10;
+  font-family:'Orbitron',sans-serif;font-size:11px;font-weight:700;
+  letter-spacing:2px;
+  padding:3px 10px;border-radius:20px;
+  background:rgba(0,0,0,0.7);border:1px solid var(--accent);
+  color:var(--accent);
+  display:none;
+  animation:streakPop 0.3s cubic-bezier(.23,1,.32,1) both;
+}
+@keyframes streakPop{from{transform:scale(0.5);opacity:0}to{transform:none;opacity:1}}
+
+</style>
+</head>
+<body>
+
+<canvas id="bgc"></canvas>
+<div id="flash"></div>
+
+<div id="shell">
+  <header id="hdr">
+    <div id="logo">MAZE<em>X</em></div>
+    <div id="diff-badge" onclick="showDiffSelect()" title="Change difficulty">EASY</div>
+    <div id="stats">
+      <div class="st"><span class="st-l">Score</span><span class="st-v" id="sv-score">0</span></div>
+      <div class="st"><span class="st-l">Moves</span><span class="st-v" id="sv-moves">0</span></div>
+      <div class="st"><span class="st-l">Time</span><span class="st-v" id="sv-time">0:00</span></div>
+    </div>
+  </header>
+
+  <div id="ribbon">
+    <span id="rib-lbl">Progress</span>
+    <div id="prog"><div id="prog-fill" style="width:0%"></div></div>
+    <span id="rib-lv">LVL 1 / 10</span>
+  </div>
+
+  <!-- HARD MODE COUNTDOWN BAR -->
+  <div id="timer-bar-wrap">
+    <span id="timer-bar-lbl">⚠ TIME</span>
+    <div id="timer-bar"><div id="timer-bar-fill"></div></div>
+    <span id="timer-bar-sec" id="tbsec">—</span>
+  </div>
+
+  <div id="mzone">
+    <div id="mframe">
+      <div class="cb"></div><div class="cb2"></div>
+      <canvas id="mc"></canvas>
+      <canvas id="fog"></canvas>
+      <div id="streak-badge">🔥 x1</div>
+    </div>
+    <div id="shint" style="display:none">SWIPE TO MOVE</div>
+  </div>
+
+  <div id="dz">
+    <!-- Left info -->
+    <div class="side">
+      <div class="mini-lbl side-label">Best</div>
+      <div class="mini-v" id="sv-best">—</div>
+      <div style="font-size:9px;color:var(--muted);margin-top:2px;">moves</div>
+    </div>
+
+    <!-- D-PAD -->
+    <div id="dpad">
+      <div class="dp dp-blank"></div>
+      <div class="dp" data-dir="up">▲</div>
+      <div class="dp dp-blank"></div>
+      <div class="dp" data-dir="left">◀</div>
+      <div class="dp dp-new" id="newbtn" onclick="resetLevel()">NEW</div>
+      <div class="dp" data-dir="right">▶</div>
+      <div class="dp dp-blank"></div>
+      <div class="dp" data-dir="down">▼</div>
+      <div class="dp dp-blank"></div>
+    </div>
+
+    <!-- Right info -->
+    <div class="side side-r">
+      <div class="side-label">Level</div>
+      <div class="side-val" id="sv-lvl" style="color:var(--accent2);">1</div>
+    </div>
+  </div>
+</div>
+
+<!-- TIMEOUT SCREEN (hard mode) -->
+<div id="timeout-screen" class="hidden">
+  <div class="to-title">TIME'S UP</div>
+  <div class="to-sub">THE MAZE SWALLOWED YOU</div>
+  <button class="cta" style="width:min(260px,80vw);margin-top:12px;" onclick="retryAfterTimeout()">↺ &nbsp;TRY AGAIN</button>
+  <button class="cta cta-sub" style="width:min(260px,80vw);" onclick="showDiffSelect()">CHANGE DIFFICULTY</button>
+</div>
+
+<!-- OVERLAY -->
+<div id="ov">
+  <div class="card" id="ov-card">
+    <div class="card-eye" id="ov-eye">MISSION BRIEFING</div>
+    <div class="card-title" id="ov-title" style="color:var(--accent)">MAZE<br><span style="color:var(--accent2)">RUNNER</span></div>
+    <div class="card-desc" id="ov-desc">
+      Navigate the labyrinth.<br>
+      Reach the <b>beacon</b> to escape each level.<br>
+      10 levels — each one deeper.
+    </div>
+    <div id="ov-stats"></div>
+
+    <!-- DIFFICULTY SELECT (shown on title screen) -->
+    <div id="diff-select" class="diff-grid">
+      <button class="diff-btn diff-easy" onclick="chooseDiff('easy')">
+        <div class="diff-icon">🌿</div>
+        <div class="diff-info">
+          <div class="diff-name">EASY</div>
+          <div class="diff-desc">Small mazes · No time pressure · Full visibility</div>
+        </div>
+        <div class="diff-tag"><span class="diff-stars">★☆☆</span></div>
+      </button>
+      <button class="diff-btn diff-medium" onclick="chooseDiff('medium')">
+        <div class="diff-icon">⚡</div>
+        <div class="diff-info">
+          <div class="diff-name">MEDIUM</div>
+          <div class="diff-desc">Larger mazes · Bonus timer · Partial trail</div>
+        </div>
+        <div class="diff-tag"><span class="diff-stars">★★☆</span></div>
+      </button>
+      <button class="diff-btn diff-hard" onclick="chooseDiff('hard')">
+        <div class="diff-icon">💀</div>
+        <div class="diff-info">
+          <div class="diff-name">HARD</div>
+          <div class="diff-desc">Huge mazes · Countdown · Fog of war</div>
+        </div>
+        <div class="diff-tag"><span class="diff-stars">★★★</span></div>
+      </button>
+    </div>
+
+    <button class="cta" id="ov-btn" style="display:none" onclick="startGame()">▶ &nbsp;BEGIN RUN</button>
+    <button class="cta cta-sub" id="ov-back" style="display:none" onclick="showTitle()">← BACK</button>
+  </div>
+</div>
+
+<script>
+// ── DIFFICULTY CONFIG ─────────────────────────────
+const DIFF_CFG = {
+  easy: {
+    BASE_N: 7,      // smaller maze
+    MAX_LVL: 8,
+    TRAIL: 30,
+    FOG: false,
+    TIME_LIMIT: 0,  // no limit
+    LABEL: 'EASY',
+    multiplier: 1,
+  },
+  medium
