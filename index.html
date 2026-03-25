@@ -564,3 +564,574 @@ const DIFF_CFG = {
     multiplier: 1,
   },
   medium
+BASE_N: 9,
+    MAX_LVL: 10,
+    TRAIL: 20,
+    FOG: false,
+    TIME_LIMIT: 0,
+    LABEL: 'MEDIUM',
+    multiplier: 1.8,
+  },
+  hard: {
+    BASE_N: 11,     // bigger mazes
+    MAX_LVL: 12,
+    TRAIL: 8,       // short trail
+    FOG: true,
+    TIME_LIMIT: 90, // seconds per level
+    LABEL: 'HARD',
+    multiplier: 3.5,
+  }
+};
+
+let difficulty = null; // chosen before game starts
+
+// ── CONSTANTS ────────────────────────────────────────
+let MAX_LVL  = 10;
+let BASE_N   = 9;
+let TRAIL    = 20;
+let FOG_ON   = false;
+let TIME_LIMIT = 0;
+
+// ── STATE ─────────────────────────────────────────────
+let lvl=1, moves=0, score=0, bestMoves=null;
+let t0, timerID, countdownID, rafID;
+let grid=[], COLS=0, ROWS=0, CELL=0;
+let px=1, py=1, ex=0, ey=0;
+let visited=[], trail=[];
+let alive=false;
+let tick=0;
+let winStreak=0;
+let timeLeft=0;
+
+const mc  = document.getElementById('mc');
+const ctx = mc.getContext('2d');
+const fogCanvas = document.getElementById('fog');
+const fogCtx = fogCanvas.getContext('2d');
+
+// ── PARTICLE BACKGROUND ────────────────────────────────
+const bgc = document.getElementById('bgc');
+const bgx = bgc.getContext('2d');
+let parts = [];
+
+function resetBg(){
+  bgc.width=window.innerWidth; bgc.height=window.innerHeight;
+  parts=Array.from({length:50},mkPart);
+}
+function mkPart(){
+  const hues = difficulty==='easy'?[150,180]:difficulty==='hard'?[0,20]:[60,300];
+  return{
+    x:Math.random()*bgc.width,
+    y:Math.random()*bgc.height,
+    vx:(Math.random()-.5)*.28,
+    vy:(Math.random()-.5)*.28,
+    r:Math.random()*1.4+.3,
+    a:Math.random(),da:.003+Math.random()*.004,
+    hue:hues[Math.floor(Math.random()*hues.length)]
+  };
+}
+function bgTick(){
+  bgx.clearRect(0,0,bgc.width,bgc.height);
+  for(const p of parts){
+    p.x+=p.vx; p.y+=p.vy; p.a+=p.da;
+    if(p.a>1||p.a<0) p.da*=-1;
+    if(p.x<-5||p.x>bgc.width+5||p.y<-5||p.y>bgc.height+5) Object.assign(p,mkPart());
+    bgx.beginPath();
+    bgx.arc(p.x,p.y,p.r,0,Math.PI*2);
+    bgx.fillStyle=`hsla(${p.hue},100%,70%,${p.a*.4})`;
+    bgx.fill();
+  }
+  requestAnimationFrame(bgTick);
+}
+window.addEventListener('resize',resetBg);
+resetBg(); bgTick();
+
+// ── MAZE GENERATION ────────────────────────────────────
+function mazeN(l){ const n=BASE_N+(l-1)*2; return n%2===0?n+1:n; }
+
+function buildMaze(C,R){
+  const g=Array.from({length:R},()=>new Uint8Array(C).fill(1));
+  const stack=[[1,1]];
+  g[1][1]=0;
+  const D=[[0,-2],[0,2],[-2,0],[2,0]];
+  while(stack.length){
+    const[cx,cy]=stack[stack.length-1];
+    const opts=D.filter(([dx,dy])=>{
+      const nx=cx+dx,ny=cy+dy;
+      return nx>0&&nx<C-1&&ny>0&&ny<R-1&&g[ny][nx]===1;
+    });
+    if(!opts.length){stack.pop();continue;}
+    const[dx,dy]=opts[Math.random()*opts.length|0];
+    g[cy+dy/2][cx+dx/2]=0;
+    g[cy+dy][cx+dx]=0;
+    stack.push([cx+dx,cy+dy]);
+  }
+  return g;
+}
+
+// ── SETUP ─────────────────────────────────────────────
+function setup(){
+  const n=mazeN(lvl);
+  COLS=n; ROWS=n;
+  grid=buildMaze(COLS,ROWS);
+  px=1; py=1; ex=COLS-2; ey=ROWS-2;
+  grid[ey][ex]=0;
+  visited=Array.from({length:ROWS},()=>new Uint8Array(COLS));
+  visited[py][px]=1;
+  trail=[[px,py]];
+  moves=0;
+  fitCanvas();
+  hud(); ribbon();
+}
+
+function fitCanvas(){
+  const mz=document.getElementById('mzone');
+  const dz=document.getElementById('dz');
+  const hd=document.getElementById('hdr');
+  const rb=document.getElementById('ribbon');
+  const tb=document.getElementById('timer-bar-wrap');
+  const tbH=FOG_ON?tb.offsetHeight:0;
+  const avH=window.innerHeight-hd.offsetHeight-rb.offsetHeight-dz.offsetHeight-tbH-18;
+  const avW=mz.offsetWidth-12;
+  const raw=Math.min(avH,avW);
+  CELL=Math.max(9,Math.floor(raw/COLS));
+  mc.width=COLS*CELL; mc.height=ROWS*CELL;
+  fogCanvas.width=COLS*CELL; fogCanvas.height=ROWS*CELL;
+  fogCanvas.style.width=mc.style.width;
+  fogCanvas.style.height=mc.style.height;
+  fogCanvas.style.position='absolute';
+  fogCanvas.style.top=0; fogCanvas.style.left=0;
+}
+
+// ── THEME COLORS by difficulty ─────────────────────────
+function getColors(){
+  if(difficulty==='easy') return {
+    wall:'#083022', wallH:'rgba(10,60,40,0.7)', floor:'#030d08', vis:'#051209',
+    playerColor:'#3affa0', exitColor:'#00d4ff', trailColor:'58,255,160'
+  };
+  if(difficulty==='hard') return {
+    wall:'#2a0a0a', wallH:'rgba(80,15,15,0.7)', floor:'#080202', vis:'#100303',
+    playerColor:'#ff3a3a', exitColor:'#ff6b00', trailColor:'255,58,58'
+  };
+  return { // medium
+    wall:'#0c1738', wallH:'rgba(17,34,74,0.7)', floor:'#060a17', vis:'#080e1e',
+    playerColor:'#f0ff00', exitColor:'#ff9500', trailColor:'240,255,0'
+  };
+}
+
+// ── RENDER ─────────────────────────────────────────────
+function render(){
+  tick++;
+  const C=CELL, W=mc.width, H=mc.height;
+  const {wall,wallH,floor,vis,playerColor,exitColor,trailColor}=getColors();
+  ctx.clearRect(0,0,W,H);
+
+  // grid
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      const x=c*C, y=r*C;
+      if(grid[r][c]===1){
+        ctx.fillStyle=wall; ctx.fillRect(x,y,C,C);
+        ctx.fillStyle=wallH; ctx.fillRect(x+1,y+1,C-2,C-2);
+        ctx.fillStyle='rgba(25,50,100,0.18)';
+        ctx.fillRect(x,y,C,1); ctx.fillRect(x,y,1,C);
+      } else {
+        ctx.fillStyle=visited[r][c]?vis:floor;
+        ctx.fillRect(x,y,C,C);
+      }
+    }
+  }
+
+  // trail
+  const ts=Math.max(0,trail.length-TRAIL);
+  for(let i=ts;i<trail.length-1;i++){
+    const[tc,tr]=trail[i];
+    const f=(i-ts)/TRAIL;
+    ctx.fillStyle=`rgba(${trailColor},${f*0.22})`;
+    const p=C*.28|0;
+    ctx.fillRect(tc*C+p,tr*C+p,C-p*2,C-p*2);
+  }
+
+  // exit
+  const ex2=ex*C, ey2=ey*C;
+  const pulse=0.62+0.38*Math.sin(tick*.07);
+  ctx.save(); ctx.globalAlpha=pulse*.28;
+  const eh=ctx.createRadialGradient(ex2+C/2,ey2+C/2,0,ex2+C/2,ey2+C/2,C*1.1);
+  eh.addColorStop(0,exitColor); eh.addColorStop(1,'transparent');
+  ctx.fillStyle=eh;
+  ctx.fillRect(ex2-C*.5,ey2-C*.5,C*2,C*2);
+  ctx.restore();
+  ctx.save(); ctx.globalAlpha=0.85+0.15*pulse;
+  const ec=ctx.createRadialGradient(ex2+C/2,ey2+C/2,0,ex2+C/2,ey2+C/2,C*.42);
+  ec.addColorStop(0,'#fff'); ec.addColorStop(.4,exitColor); ec.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=ec;
+  ctx.beginPath(); ctx.arc(ex2+C/2,ey2+C/2,C*.42,0,Math.PI*2); ctx.fill();
+  ctx.restore();
+  const bk=Math.min(5,C*.18)|0;
+  ctx.strokeStyle=`rgba(${hexToRgb(exitColor)},${.55+.45*pulse})`; ctx.lineWidth=1.5;
+  [[0,0],[C,0],[0,C],[C,C]].forEach(([ox,oy])=>{
+    const sx=ex2+ox,sy=ey2+oy;
+    ctx.beginPath();
+    ctx.moveTo(sx+(ox?-bk:bk),sy); ctx.lineTo(sx,sy); ctx.lineTo(sx,sy+(oy?-bk:bk));
+    ctx.stroke();
+  });
+    // player
+  const ppx=px*C+C/2, ppy=py*C+C/2, pr=C*.38;
+  const ph=ctx.createRadialGradient(ppx,ppy,0,ppx,ppy,pr*2.4);
+  ph.addColorStop(0,`rgba(${trailColor},0.14)`); ph.addColorStop(1,'transparent');
+  ctx.fillStyle=ph; ctx.beginPath(); ctx.arc(ppx,ppy,pr*2.4,0,Math.PI*2); ctx.fill();
+  const pb=ctx.createRadialGradient(ppx-pr*.18,ppy-pr*.18,0,ppx,ppy,pr);
+  pb.addColorStop(0,'#fff'); pb.addColorStop(.3,playerColor); pb.addColorStop(1,'rgba(0,0,0,0)');
+  ctx.fillStyle=pb; ctx.beginPath(); ctx.arc(ppx,ppy,pr,0,Math.PI*2); ctx.fill();
+
+  // FOG OF WAR (hard mode)
+  if(FOG_ON) renderFog(C);
+
+  rafID=requestAnimationFrame(render);
+}
+
+function renderFog(C){
+  const W=fogCanvas.width, H=fogCanvas.height;
+  fogCtx.clearRect(0,0,W,H);
+  fogCtx.fillStyle='rgba(10,3,3,0.92)';
+  fogCtx.fillRect(0,0,W,H);
+  // reveal radius around player
+  const vis=C*3.2;
+  const ppx=px*C+C/2, ppy=py*C+C/2;
+  const grad=fogCtx.createRadialGradient(ppx,ppy,0,ppx,ppy,vis);
+  grad.addColorStop(0,'rgba(0,0,0,1)');
+  grad.addColorStop(0.55,'rgba(0,0,0,1)');
+  grad.addColorStop(0.85,'rgba(0,0,0,0.5)');
+  grad.addColorStop(1,'rgba(0,0,0,0)');
+  fogCtx.globalCompositeOperation='destination-out';
+  fogCtx.fillStyle=grad;
+  fogCtx.beginPath(); fogCtx.arc(ppx,ppy,vis,0,Math.PI*2); fogCtx.fill();
+  fogCtx.globalCompositeOperation='source-over';
+  // also partially reveal exit as a glow hint
+  const ex2=ex*C+C/2, ey2=ey*C+C/2;
+  const pulse=0.5+0.5*Math.sin(tick*.05);
+  const eg=fogCtx.createRadialGradient(ex2,ey2,0,ex2,ey2,C*1.5);
+  eg.addColorStop(0,`rgba(0,0,0,${0.7*pulse})`);
+  eg.addColorStop(1,'rgba(0,0,0,0)');
+  fogCtx.globalCompositeOperation='destination-out';
+  fogCtx.fillStyle=eg;
+  fogCtx.beginPath(); fogCtx.arc(ex2,ey2,C*1.5,0,Math.PI*2); fogCtx.fill();
+  fogCtx.globalCompositeOperation='source-over';
+}
+
+function hexToRgb(hex){
+  const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16);
+  return `${r},${g},${b}`;
+}
+
+// ── MOVEMENT ──────────────────────────────────────────
+const DM={up:[0,-1],down:[0,1],left:[-1,0],right:[1,0]};
+function move(dir){
+  if(!alive) return;
+  const[dx,dy]=DM[dir];
+  const nx=px+dx, ny=py+dy;
+  if(nx<0||ny<0||nx>=COLS||ny>=ROWS||grid[ny][nx]===1) return;
+  px=nx; py=ny; moves++;
+  if(!visited[py][px]) visited[py][px]=1;
+  trail.push([px,py]);
+  hud();
+  if(px===ex&&py===ey) onWin();
+}
+
+// ── WIN ────────────────────────────────────────────────
+function onWin(){
+  alive=false;
+  clearInterval(timerID);
+  clearInterval(countdownID);
+  cancelAnimationFrame(rafID);
+  winStreak++;
+  const clearedLvl=lvl;
+  const sec=Math.floor((Date.now()-t0)/1000);
+  const pts=calcPts(sec);
+  score+=pts;
+  if(bestMoves===null||moves<bestMoves) bestMoves=moves;
+  lvl++; // advance before showing next screen
+  flash();
+  showStreak();
+  setTimeout(()=>clearedLvl>=MAX_LVL?showEnd():showClear(clearedLvl,sec,pts),360);
+}
+
+function showStreak(){
+  if(winStreak<2) return;
+  const b=document.getElementById('streak-badge');
+  b.style.display='block';
+  b.textContent=`🔥 ×${winStreak}`;
+  b.style.animation='none'; void b.offsetWidth; b.style.animation='streakPop 0.3s cubic-bezier(.23,1,.32,1) both';
+  clearTimeout(showStreak._t);
+  showStreak._t=setTimeout(()=>b.style.display='none',2500);
+}
+
+function calcPts(s){
+  const n=mazeN(lvl);
+  const cells=((n-1)/2)**2;
+  const cfg=DIFF_CFG[difficulty]||DIFF_CFG.medium;
+  const bonusTime=FOG_ON&&timeLeft>0?Math.floor(timeLeft*8):0;
+  return Math.max(50,Math.round((cells*15/Math.max(1,s)*50-moves*.5)*cfg.multiplier)|0)+bonusTime;
+}
+
+// ── COUNTDOWN (hard mode) ─────────────────────────────
+function startCountdown(){
+  if(!TIME_LIMIT) return;
+  timeLeft=TIME_LIMIT+(lvl-1)*5; // extra time per level
+  updateCountdownBar();
+  clearInterval(countdownID);
+  countdownID=setInterval(()=>{
+    timeLeft--;
+    updateCountdownBar();
+    if(timeLeft<=0){
+      clearInterval(countdownID);
+      onTimeout();
+    }
+  },1000);
+}
+
+function updateCountdownBar(){
+  if(!TIME_LIMIT) return;
+  const maxTime=TIME_LIMIT+(lvl-1)*5;
+  const pct=Math.max(0,(timeLeft/maxTime)*100);
+  document.getElementById('timer-bar-fill').style.width=pct+'%';
+  document.getElementById('timer-bar-sec').textContent=timeLeft+'s';
+  // danger color when low
+  const fill=document.getElementById('timer-bar-fill');
+  if(timeLeft<=10){
+    fill.style.background='linear-gradient(90deg,#ff0000,#ff3a3a)';
+    fill.style.animation='dangerFlash 0.5s ease-in-out infinite';
+  } else {
+    fill.style.background='linear-gradient(90deg,#ff6b00,#ff3a3a)';
+    fill.style.animation='';
+  }
+}
+
+function onTimeout(){
+  if(!alive) return;
+  alive=false;
+  clearInterval(timerID);
+  cancelAnimationFrame(rafID);
+  winStreak=0;
+  document.getElementById('streak-badge').style.display='none';
+  setTimeout(()=>{
+    document.getElementById('timeout-screen').classList.remove('hidden');
+  },200);
+}
+
+function retryAfterTimeout(){
+  document.getElementById('timeout-screen').classList.add('hidden');
+  setup(); go();
+}
+
+// ── SCREENS ────────────────────────────────────────────
+function chooseDiff(d){
+  difficulty=d;
+  const cfg=DIFF_CFG[d];
+  MAX_LVL=cfg.MAX_LVL;
+  BASE_N=cfg.BASE_N;
+  TRAIL=cfg.TRAIL;
+  FOG_ON=cfg.FOG;
+  TIME_LIMIT=cfg.TIME_LIMIT;
+  // apply body class
+  document.body.className=d;
+  // update badge
+  document.getElementById('diff-badge').textContent=cfg.LABEL;
+  // refresh particle hues
+  parts.forEach(p=>Object.assign(p,mkPart()));
+  // show play button
+  document.getElementById('diff-select').style.display='none';
+  document.getElementById('ov-btn').style.display='block';
+  document.getElementById('ov-back').style.display='block';
+  document.getElementById('ov-eye').textContent='READY TO RUN';
+  const titles={easy:'<span style="color:#3affa0">EASY</span><br><span style="color:#00d4ff;font-size:.6em">PATHFINDER</span>',
+    medium:'<span style="color:#f0ff00">MEDIUM</span><br><span style="color:#ff9500;font-size:.6em">NAVIGATOR</span>',
+    hard:'<span style="color:#ff3a3a">HARD</span><br><span style="color:#ff6b00;font-size:.6em">PRISONER</span>'};
+  document.getElementById('ov-title').innerHTML=titles[d];
+  const descs={
+    easy:`Navigate lush green labyrinths.<br>No time pressure. <b>Perfect for beginners.</b><br>${cfg.MAX_LVL} levels of peaceful exploration.`,
+    medium:`Larger corridors, more dead ends.<br>Bonus points for speed. <b>${cfg.MAX_LVL} levels</b> of challenge.`,
+    hard:`Massive mazes. <b>Fog hides your path.</b><br>Each level has a countdown. Miss it and you die.<br><b>${cfg.MAX_LVL} levels</b> if you dare.`
+  };
+  document.getElementById('ov-desc').innerHTML=descs[d];
+  document.getElementById('ov-btn').textContent=`▶  BEGIN RUN`;
+  document.getElementById('ov-btn').onclick=startGame;
+}
+
+function showTitle(){
+  document.getElementById('diff-select').style.display='';
+  document.getElementById('ov-btn').style.display='none';
+  document.getElementById('ov-back').style.display='none';
+  document.getElementById('ov-eye').textContent='MISSION BRIEFING';
+  document.getElementById('ov-title').innerHTML='MAZE<br><span style="color:var(--accent2)">RUNNER</span>';
+  document.getElementById('ov-desc').innerHTML=`Navigate the labyrinth.<br>Reach the <b>beacon</b> to escape each level.<br>Choose your difficulty below.`;
+}
+
+function showDiffSelect(){
+  clearInterval(timerID); clearInterval(countdownID); cancelAnimationFrame(rafID);
+  alive=false;
+  document.getElementById('timeout-screen').classList.add('hidden');
+  document.getElementById('ov-stats').innerHTML='';
+  showTitle();
+  openOv();
+  }
+  function startGame(){
+  lvl=1;score=0;moves=0;bestMoves=null;winStreak=0;
+  closeOv(); setup(); go();
+}
+function resetLevel(){
+  if(!alive) return;
+  clearInterval(timerID); clearInterval(countdownID); cancelAnimationFrame(rafID);
+  setup(); go();
+}
+function continueNext(){ closeOv(); setup(); go(); }
+
+function go(){
+  startTimer();
+  if(TIME_LIMIT) startCountdown();
+  cancelAnimationFrame(rafID); render(); alive=true; showHint();
+}
+
+function showClear(clearedLvl,sec,pts){
+  const m=Math.floor(sec/60);
+  const ts=`${m}:${String(sec%60).padStart(2,'0')}`;
+  document.getElementById('ov-eye').textContent='LEVEL CLEARED';
+  const streakBonus=winStreak>=3?`<span style="color:#f0ff00"> +STREAK BONUS</span>`:'';
+  document.getElementById('ov-title').innerHTML=
+    `<span style="color:var(--safe)">ESCAPED</span><br><span style="font-size:.5em;color:var(--accent2)">LEVEL ${clearedLvl}</span>`;
+  document.getElementById('ov-desc').innerHTML='';
+  const timeBonus=FOG_ON&&timeLeft>0?`<div class="sc"><div class="sc-l">Time Left</div><div class="sc-v" style="color:var(--safe)">${timeLeft}s</div></div>`:'';
+  document.getElementById('ov-stats').innerHTML=`
+    <div class="sgrid">
+      <div class="sc"><div class="sc-l">Moves</div><div class="sc-v">${moves}</div></div>
+      <div class="sc"><div class="sc-l">Time</div><div class="sc-v">${ts}</div></div>
+      <div class="sc"><div class="sc-l">Points</div><div class="sc-v" style="color:var(--safe)">+${pts}</div></div>
+      <div class="sc"><div class="sc-l">Total</div><div class="sc-v">${score}</div></div>
+      ${timeBonus}
+      ${winStreak>=2?`<div class="sc"><div class="sc-l">Streak</div><div class="sc-v" style="color:#f0ff00">🔥×${winStreak}</div></div>`:''}
+    </div>`;
+  document.getElementById('diff-select').style.display='none';
+  const b=document.getElementById('ov-btn');
+  b.style.display='block';
+  b.textContent=`▶  LEVEL ${lvl}`; b.onclick=continueNext;
+  document.getElementById('ov-back').style.display='none';
+  openOv();
+}
+
+function showEnd(){
+  document.getElementById('ov-eye').textContent='ALL MAZES CLEARED';
+  document.getElementById('ov-title').innerHTML=
+    `<span style="color:#ffd700">CHAMPION</span>`;
+  const diffLabel=DIFF_CFG[difficulty]?.LABEL||'';
+  document.getElementById('ov-desc').innerHTML=
+    `You conquered all ${MAX_LVL} labyrinths on <b style="color:var(--accent)">${diffLabel}</b>.<br>Final score: <b style="color:var(--accent)">${score}</b>`;
+  document.getElementById('ov-stats').innerHTML=`
+    <div class="sgrid">
+      <div class="sc"><div class="sc-l">Score</div><div class="sc-v" style="color:#ffd700">${score}</div></div>
+      <div class="sc"><div class="sc-l">Best Run</div><div class="sc-v">${bestMoves??'—'}</div></div>
+      <div class="sc"><div class="sc-l">Streak</div><div class="sc-v" style="color:#f0ff00">🔥×${winStreak}</div></div>
+      <div class="sc"><div class="sc-l">Difficulty</div><div class="sc-v">${diffLabel}</div></div>
+    </div>`;
+  document.getElementById('diff-select').style.display='none';
+  const b=document.getElementById('ov-btn');
+  b.style.display='block';
+  b.textContent='▶  PLAY AGAIN'; b.onclick=startGame;
+  document.getElementById('ov-back').style.display='block';
+  document.getElementById('ov-back').textContent='⚙ CHANGE DIFFICULTY';
+  document.getElementById('ov-back').onclick=showDiffSelect;
+  openOv();
+}
+
+function openOv(){ document.getElementById('ov').classList.remove('hidden'); }
+function closeOv(){ document.getElementById('ov').classList.add('hidden'); }
+
+function flash(){
+  const f=document.getElementById('flash');
+  f.classList.add('go'); setTimeout(()=>f.classList.remove('go'),150);
+}
+
+// ── TIMER ──────────────────────────────────────────────
+function startTimer(){
+  t0=Date.now(); clearInterval(timerID);
+  timerID=setInterval(()=>{
+    const s=Math.floor((Date.now()-t0)/1000);
+    document.getElementById('sv-time').textContent=
+      `${Math.floor(s/60)}:${String(s%60).padStart(2,'0')}`;
+  },500);
+}
+
+// ── HUD ────────────────────────────────────────────────
+function hud(){
+  document.getElementById('sv-score').textContent=score;
+  document.getElementById('sv-moves').textContent=moves;
+  document.getElementById('sv-lvl').textContent=lvl;
+  document.getElementById('sv-best').textContent=bestMoves??'—';
+}
+function ribbon(){
+  document.getElementById('prog-fill').style.width=((lvl/MAX_LVL)*100)+'%';
+  document.getElementById('rib-lv').textContent=`LVL ${lvl} / ${MAX_LVL}`;
+}
+
+// ── SWIPE HINT ─────────────────────────────────────────
+function showHint(){
+  const h=document.getElementById('shint');
+  h.style.display='block'; h.style.animation='none';
+  void h.offsetWidth;
+  h.style.animation='fhint 3s ease forwards';
+  setTimeout(()=>h.style.display='none',3200);
+}
+
+// ── D-PAD INPUTS ───────────────────────────────────────
+let holdID=null;
+document.querySelectorAll('.dp[data-dir]').forEach(el=>{
+  const dir=el.dataset.dir;
+  function dn(e){
+    e.preventDefault();
+    el.classList.add('on');
+    move(dir);
+    clearInterval(holdID);
+    holdID=setInterval(()=>move(dir),120);
+  }
+  function up(){
+    el.classList.remove('on');
+    clearInterval(holdID);
+  }
+  el.addEventListener('touchstart',dn,{passive:false});
+  el.addEventListener('touchend',up,{passive:true});
+  el.addEventListener('touchcancel',up,{passive:true});
+  el.addEventListener('mousedown',dn);
+  el.addEventListener('mouseup',up);
+  el.addEventListener('mouseleave',up);
+});
+
+// ── KEYBOARD ───────────────────────────────────────────
+const KM={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',
+          w:'up',s:'down',a:'left',d:'right',W:'up',S:'down',A:'left',D:'right'};
+const held={};
+document.addEventListener('keydown',e=>{
+  const d=KM[e.key]; if(!d) return; e.preventDefault();
+  if(!held[e.key]){held[e.key]=true;move(d);}
+});
+document.addEventListener('keyup',e=>{held[e.key]=false;});
+
+// ── SWIPE ON MAZE ──────────────────────────────────────
+let sx=null,sy=null;
+const mzone=document.getElementById('mzone');
+mzone.addEventListener('touchstart',e=>{sx=e.touches[0].clientX;sy=e.touches[0].clientY;},{passive:true});
+mzone.addEventListener('touchend',e=>{
+  if(sx===null) return;
+  const dx=e.changedTouches[0].clientX-sx, dy=e.changedTouches[0].clientY-sy;
+  const adx=Math.abs(dx), ady=Math.abs(dy);
+  if(Math.max(adx,ady)<22){sx=null;return;}
+  move(adx>ady?(dx>0?'right':'left'):(dy>0?'down':'up'));
+  sx=null;
+},{passive:true});
+
+// ── RESIZE ─────────────────────────────────────────────
+window.addEventListener('resize',()=>{if(alive)fitCanvas();});
+document.addEventListener('contextmenu',e=>e.preventDefault());
+
+// ── INIT: show title with no difficulty selected ────────
+showTitle();
+</script>
+</body>
+</html>
